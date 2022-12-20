@@ -1,0 +1,125 @@
+name: Legit Attestation
+
+permissions:
+  contents: read
+
+env:
+  ATTESTATION_DIR: /tmp/attestations
+
+on:
+  workflow_call:
+    inputs:
+      inputs-file-text:
+        description: "The output from legit-attestation-inputs."
+        required: true
+        type: string
+    secrets:
+      api-token:
+        required: true
+      integration-id:
+        required: true
+      legit-tenant-url:
+        required: true
+
+jobs:
+  attestations:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # Needed to read workflow info.
+    steps:
+      - name: Generate and sign Snyk attestation 
+        id: snyk_attest
+        env:
+          INPUTS_FILE_TEXT: "${{ inputs.inputs-file-text }}"
+          API_TOKEN: "${{ secrets.api-token }}"
+          INTEGRATION_ID: "${{ secrets.integration-id }}"
+          LEGIT_TENANT_URL: "${{ secrets.legit-tenant-url }}"
+          REPOSITORY: "${{ github.event.repository.id }}"
+          ATTESTATION_NAME: legit-snyk.intoto.jsonl
+        run: |
+          set -x
+          set -e
+          auth="Authorization: Bearer $API_TOKEN"
+          integ="\"integrationId\":\"$INTEGRATION_ID\""
+          repo="\"repositoryId\":\"$REPOSITORY\""
+          commit="\"commitId\":\"$GITHUB_SHA\""
+          inputs_file_text="\"inputsFileText\":\"$INPUTS_FILE_TEXT\""
+          api_endpoint="${LEGIT_TENANT_URL}/api/attestations/github/snyk-findings"
+          apt update && install -y curl
+          echo curl \
+          -o "response" \
+          --request POST -w '%{http_code}' \
+          -H 'Content-Type: application/json-patch+json' \
+          -H "$auth" \
+          -d "{$integ, $repo,$commit,$inputs_file_text}" \
+          "$api_endpoint"
+          code=$(curl \
+          -o "response" \
+          --request POST -w '%{http_code}' \
+          -H 'Content-Type: application/json-patch+json' \
+          -H "$auth" \
+          -d "{$integ, $repo,$commit,$inputs_file_text}" \
+          "$api_endpoint")
+          if test "$code" != "201"; then
+              echo "invalid response code - $code"
+              cat "$response"
+              exit 1
+          fi
+          docs=$(cat response | jq --raw-output '.content | length')
+          echo "found $docs attestation documents"
+          mkdir -p ${ATTESTATION_DIR}
+          for i in $(seq 0 $(( ${docs} - 1 )) ); do
+              cat response | jq --raw-output ".content[$i]" | base64 -d > "${ATTESTATION_DIR}/${i}-${ATTESTATION_NAME}"
+          done
+          
+      - name: Generate and sign code-review attestation 
+        id: code_review_attest
+        env:
+          INPUTS_FILE_TEXT: "${{ inputs.inputs-file-text }}"
+          API_TOKEN: "${{ secrets.api-token }}"
+          INTEGRATION_ID: "${{ secrets.integration-id }}"
+          LEGIT_TENANT_URL: "${{ secrets.legit-tenant-url }}"
+          REPOSITORY: "${{ github.event.repository.id }}"
+          ATTESTATION_NAME: legit-code-review.intoto.jsonl
+        run: |
+          set -x
+          set -e
+          auth="Authorization: Bearer $API_TOKEN"
+          integ="\"integrationId\":\"$INTEGRATION_ID\""
+          repo="\"repositoryId\":\"$REPOSITORY\""
+          commit="\"commitId\":\"$GITHUB_SHA\""
+          inputs_file_text="\"inputsFileText\":\"$INPUTS_FILE_TEXT\""
+          api_endpoint="${LEGIT_TENANT_URL}/api/attestations/github/code-review"
+          apt update && install -y curl
+          echo curl \
+          -o "response" \
+          --request POST -w '%{http_code}' \
+          -H 'Content-Type: application/json-patch+json' \
+          -H "$auth" \
+          -d "{$integ, $repo,$commit,$inputs_file_text}" \
+          "$api_endpoint"
+          code=$(curl \
+          -o "response" \
+          --request POST -w '%{http_code}' \
+          -H 'Content-Type: application/json-patch+json' \
+          -H "$auth" \
+          -d "{$integ, $repo,$commit,$inputs_file_text}" \
+          "$api_endpoint")
+          if test "$code" != "201"; then
+              echo "invalid response code - $code"
+              cat "$response"
+              exit 1
+          fi
+          docs=$(cat response | jq --raw-output '.content | length')
+          echo "found $docs attestation documents"
+          mkdir -p ${ATTESTATION_DIR}
+          for i in $(seq 0 $(( ${docs} - 1 )) ); do
+              cat response | jq --raw-output ".content[$i]" | base64 -d > "${ATTESTATION_DIR}/${i}-${ATTESTATION_NAME}"
+          done
+
+      - name: Upload resulting artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: attestations
+          path: ${{ env.ATTESTATION_DIR }}/*

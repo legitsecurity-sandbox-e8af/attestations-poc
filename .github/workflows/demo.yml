@@ -1,0 +1,41 @@
+name: Build Hello World application with attestations via Legit's Platform
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions: read-all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # To upload assets to release.
+      actions: read # To read the workflow path.
+    outputs:
+      subjects: ${{ steps.build.outputs.subjects }}
+    steps:
+      - id: checkout
+        uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579 # tag=v2.3.4
+        with:
+          fetch-depth: 0
+      - id: build
+        run: |
+          echo "this is where you build a docker..."
+          echo "e.g. pushed:"
+          echo "my-docker@sha256:3abe2e34c907c211ddd925e548becebcb14607ed4276ae94205bda4b99cc4549"
+
+  # Generate Attestations
+  generate:
+    needs: [build]
+    permissions:
+      contents: write # To upload assets to release.
+      actions: read # To read the workflow path.
+    uses: ./.github/workflows/generate_attestations.yml
+    with:
+      inputs-file-text: docker=my-docker@sha256:3abe2e34c907c211ddd925e548becebcb14607ed4276ae94205bda4b99cc4549
+    secrets:
+      api-token: ${{ secrets.API_TOKEN }}
+      integration-id: ${{ secrets.INTEGRATION_ID }}
+      legit-tenant-url: ${{ secrets.TENANT_URL }}
